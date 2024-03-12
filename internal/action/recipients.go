@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gopasspw/gopass/internal/action/exit"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/cui"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/internal/set"
@@ -62,6 +63,12 @@ func (s *Action) recipientsList(ctx context.Context) []string {
 // completion.
 func (s *Action) RecipientsComplete(c *cli.Context) {
 	ctx := ctxutil.WithGlobalFlags(c)
+	if err := s.IsInitialized(c); err != nil {
+		debug.Log("IsInitialized returned error: %s", err)
+
+		return
+	}
+
 	for _, v := range s.recipientsList(ctx) {
 		fmt.Fprintln(stdout, v)
 	}
@@ -112,6 +119,7 @@ func (s *Action) RecipientsAdd(c *cli.Context) error {
 			out.Warningf(ctx, "Failed to list public key %q: %s", r, err)
 			var imported bool
 			if sub, err := s.Store.GetSubStore(store); err == nil {
+				ctx = config.WithMount(ctx, store)
 				if err := sub.ImportMissingPublicKeys(ctx, r); err != nil {
 					out.Warningf(ctx, "Failed to import missing public keys: %s", err)
 				}

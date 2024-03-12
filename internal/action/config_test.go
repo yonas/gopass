@@ -2,11 +2,11 @@ package action
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/tests/gptest"
@@ -17,7 +17,7 @@ import (
 func TestConfig(t *testing.T) {
 	u := gptest.NewUnitTester(t)
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithInteractive(ctx, false)
 	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
@@ -46,7 +46,8 @@ core.nopager = true
 core.notifications = true
 generate.autoclip = true
 `
-		want += "mounts.path = " + u.StoreDir("") + "\n"
+		want += "mounts.path = " + u.StoreDir("") + "\n" +
+			"pwgen.xkcd-lang = en\n"
 		assert.Equal(t, want, buf.String())
 	})
 
@@ -87,8 +88,10 @@ core.nopager = true
 core.notifications = true
 generate.autoclip = true
 `
-		want += "mounts.path = " + u.StoreDir("")
-		assert.Equal(t, want, strings.TrimSpace(buf.String()), "action.printConfigValues")
+		want += "mounts.path = " + u.StoreDir("") + "\n" +
+			"pwgen.xkcd-lang = en\n"
+
+		assert.Equal(t, want, buf.String(), "action.printConfigValues")
 	})
 
 	t.Run("show autoimport value", func(t *testing.T) {
@@ -120,6 +123,7 @@ core.nopager
 core.notifications
 generate.autoclip
 mounts.path
+pwgen.xkcd-lang
 `
 		assert.Equal(t, want, buf.String())
 	})

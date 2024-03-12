@@ -20,11 +20,12 @@ import (
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/pkg/debug"
 	"github.com/urfave/cli/v2"
+	"github.com/xhit/go-str2duration"
 )
 
 var (
-	autosyncIntervalDays = 3
-	autosyncLastRun      time.Time
+	autosyncInterval = time.Duration(3*24) * time.Hour
+	autosyncLastRun  time.Time
 )
 
 func init() {
@@ -40,7 +41,7 @@ func init() {
 		return
 	}
 
-	autosyncIntervalDays = iv
+	autosyncInterval = time.Duration(iv*24) * time.Hour
 }
 
 // Sync all stores with their remotes.
@@ -69,13 +70,21 @@ func (s *Action) autoSync(ctx context.Context) error {
 
 	ls := s.rem.LastSeen("autosync")
 	debug.Log("autosync - last seen: %s", ls)
-	syncInterval := autosyncIntervalDays
+	syncInterval := autosyncInterval
 
-	if s.cfg.IsSet("autosync.interval") {
-		syncInterval = s.cfg.GetInt("autosync.interval")
+	if intervalStr := s.cfg.Get("autosync.interval"); intervalStr != "" {
+		if _, err := strconv.Atoi(intervalStr); err == nil {
+			intervalStr += "d"
+		}
+		if duration, err := str2duration.Str2Duration(intervalStr); err != nil {
+			out.Warningf(ctx, "failed to parse autosync.interval %q: %q", intervalStr, err)
+		} else {
+			syncInterval = duration
+		}
 	}
+	debug.Log("autosync - interval: %s", syncInterval)
 
-	if time.Since(ls) > time.Duration(syncInterval)*24*time.Hour {
+	if time.Since(ls) > syncInterval {
 		err := s.sync(ctx, "")
 		if err != nil {
 			autosyncLastRun = time.Now()
@@ -109,10 +118,10 @@ func (s *Action) sync(ctx context.Context, store string) error {
 	// sync all stores (root and all mounted sub stores).
 	for _, mp := range mps {
 		if store != "" {
-			if store != "root" && mp != store {
+			if store != "<root>" && mp != store {
 				continue
 			}
-			if store == "root" && mp != "" {
+			if store == "<root>" && mp != "" {
 				continue
 			}
 		}
@@ -141,6 +150,7 @@ func (s *Action) sync(ctx context.Context, store string) error {
 	}
 
 	if numEntries != 0 {
+		ctx = config.WithMount(ctx, store)
 		_ = notify.Notify(ctx, "gopass - sync", fmt.Sprintf("Finished. Synced %d remotes.%s", numMPs, diff))
 	}
 
@@ -183,9 +193,8 @@ func (s *Action) syncMount(ctx context.Context, mp string) error {
 	}
 
 	out.Printf(ctxno, "\n   "+color.GreenString("%s pull and push ... ", sub.Storage().Name()))
-	err = sub.Storage().Push(ctx, "", "")
 
-	switch {
+	switch err := sub.Storage().Push(ctx, "", ""); {
 	case err == nil:
 		debug.Log("Push succeeded")
 		out.Printf(ctxno, color.GreenString("OK"))
@@ -210,7 +219,7 @@ func (s *Action) syncMount(ctx context.Context, mp string) error {
 	}
 	syncPrintDiff(ctxno, l, ln)
 
-	exportKeys := s.cfg.GetBool("core.exportkeys")
+	exportKeys := s.cfg.GetBoolM(mp, "core.exportkeys")
 	debug.Log("Syncing Mount %s. Exportkeys: %t", mp, exportKeys)
 	if err := syncImportKeys(ctxno, sub, name); err != nil {
 		return err

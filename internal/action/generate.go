@@ -58,6 +58,9 @@ func (s *Action) Generate(c *cli.Context) error {
 		}
 	}
 
+	mp := s.Store.MountPoint(name)
+	ctx = config.WithMount(ctx, mp)
+
 	// generate password.
 	password, err := s.generatePassword(ctx, c, length, name)
 	if err != nil {
@@ -167,17 +170,18 @@ func (s *Action) generatePassword(ctx context.Context, c *cli.Context, length, n
 		return s.generatePasswordForRule(ctx, c, length, name, domain, rule)
 	}
 
-	cfg := config.FromContext(ctx)
+	cfg, mp := config.FromContext(ctx)
+
 	symbols := false
 	if c.IsSet("symbols") {
 		symbols = c.Bool("symbols")
 	} else {
-		if cfg.IsSet("generate.symbols") {
-			symbols = cfg.GetBool("generate.symbols")
+		if cfg.GetM(mp, "generate.symbols") != "" {
+			symbols = cfg.GetBoolM(mp, "generate.symbols")
 		}
 	}
 
-	generator := cfg.Get("generate.generator")
+	generator := cfg.GetM(mp, "generate.generator")
 	if c.IsSet("generator") {
 		generator = c.String("generator")
 	}
@@ -285,16 +289,24 @@ func (s *Action) generatePasswordForRule(ctx context.Context, c *cli.Context, le
 // generatePasswordXKCD walks through the steps necessary to create an XKCD-style
 // password.
 func (s *Action) generatePasswordXKCD(ctx context.Context, c *cli.Context, length string) (string, error) {
-	sep := config.String(c.Context, "pwgen.xkcd.sep")
+	sep := config.String(c.Context, "pwgen.xkcd-sep")
 	if c.IsSet("sep") {
 		sep = c.String("sep")
 	}
-	lang := config.String(c.Context, "pwgen.xkcd.lang")
+	lang := config.String(c.Context, "pwgen.xkcd-lang")
 	if c.IsSet("lang") {
 		lang = c.String("lang")
 	}
+	capitalize := config.Bool(c.Context, "pwgen.xkcd-capitalize")
+	if c.IsSet("xkcdcapitalize") {
+		capitalize = c.Bool("xkcdcapitalize")
+	}
+	num := config.Bool(c.Context, "pwgen.xkcd-numbers")
+	if c.IsSet("xkcdnumbers") {
+		num = c.Bool("xkcdnumbers")
+	}
 
-	pwlen := config.Int(c.Context, "pwgen.xkcd.len")
+	pwlen := config.Int(c.Context, "pwgen.xkcd-len")
 	switch {
 	case length != "":
 		// using the command line supplied value
@@ -319,7 +331,7 @@ func (s *Action) generatePasswordXKCD(ctx context.Context, c *cli.Context, lengt
 		return "", exit.Error(exit.Usage, nil, "password length must not be zero")
 	}
 
-	return xkcdgen.RandomLengthDelim(pwlen, sep, lang)
+	return xkcdgen.RandomLengthDelim(pwlen, sep, lang, capitalize, num)
 }
 
 // generateSetPassword will update or create a secret.
@@ -502,15 +514,12 @@ func filterPrefix(in []string, prefix string) []string {
 }
 
 func isStrict(ctx context.Context, c *cli.Context) bool {
-	cfg := config.FromContext(ctx)
+	cfg, mp := config.FromContext(ctx)
 
 	if c.Bool("strict") {
 		return true
 	}
 
-	if cfg.IsSet("generate.strict") {
-		return cfg.GetBool("generate.strict")
-	}
-
-	return false
+	// if the config option is not set, GetBoolM will return false by default
+	return cfg.GetBoolM(mp, "generate.strict")
 }

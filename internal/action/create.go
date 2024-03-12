@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gopasspw/gopass/internal/action/exit"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/create"
 	"github.com/gopasspw/gopass/internal/cui"
 	"github.com/gopasspw/gopass/internal/hook"
@@ -23,9 +24,19 @@ func (s *Action) Create(c *cli.Context) error {
 
 	wiz, err := create.New(ctx, s.Store.Storage(ctx, c.String("store")))
 	if err != nil {
-		return err
+		return exit.Error(exit.Unknown, err, "Failed to initialize wizard")
 	}
+
 	acts := wiz.Actions(s.Store, s.createPrintOrCopy)
+	// this should usually not happen because we initialize the templates if none
+	// exist.
+	if len(acts) < 1 {
+		return exit.Error(exit.Unknown, nil, "no wizard actions available")
+	}
+	// no need to ask if there is only one action available.
+	if len(acts) == 1 {
+		return acts.Run(ctx, c, 0)
+	}
 
 	act, sel := cui.GetSelection(ctx, "Please select the type of secret you would like to create", acts.Selection())
 	switch act {
@@ -50,7 +61,7 @@ func (s *Action) createPrintOrCopy(ctx context.Context, c *cli.Context, name, pa
 		return nil
 	}
 
-	if err := clipboard.CopyTo(ctx, name, []byte(password), s.cfg.GetInt("core.cliptimeout")); err != nil {
+	if err := clipboard.CopyTo(ctx, name, []byte(password), config.Int(ctx, "core.cliptimeout")); err != nil {
 		return exit.Error(exit.IO, err, "failed to copy to clipboard: %s", err)
 	}
 

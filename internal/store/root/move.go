@@ -42,58 +42,21 @@ func (r *Store) move(ctx context.Context, from, to string, del bool) error {
 	subFrom, fromPrefix := r.getStore(from)
 	subTo, _ := r.getStore(to)
 
-	srcIsDir := r.IsDir(ctx, from)
-	dstIsDir := r.IsDir(ctx, to)
-
-	if srcIsDir && r.Exists(ctx, to) && !dstIsDir {
-		return fmt.Errorf("destination is a file")
-	}
-
-	if err := r.moveFromTo(ctx, subFrom, from, to, fromPrefix, srcIsDir, dstIsDir, del); err != nil {
+	if err := r.moveFromTo(ctx, subFrom, from, to, fromPrefix, del); err != nil {
 		return err
 	}
 
-	if err := subFrom.Storage().Commit(ctx, fmt.Sprintf("Move from %s to %s", from, to)); del && err != nil {
-		switch {
-		case errors.Is(err, store.ErrGitNotInit):
-			debug.Log("skipping git commit - git not initialized in %s", subFrom.Alias())
-		case errors.Is(err, store.ErrGitNothingToCommit):
-			debug.Log("skipping git commit - nothing to commit in %s", subFrom.Alias())
-		default:
-			return fmt.Errorf("failed to commit changes to git (%s): %w", subFrom.Alias(), err)
-		}
+	if err := subFrom.Storage().TryCommit(ctx, fmt.Sprintf("Move from %s to %s", from, to)); del && err != nil {
+		return fmt.Errorf("failed to commit changes to git (%s): %w", subFrom.Alias(), err)
 	}
 
 	if !subFrom.Equals(subTo) {
-		if err := subTo.Storage().Commit(ctx, fmt.Sprintf("Move from %s to %s", from, to)); err != nil {
-			switch {
-			case errors.Is(err, store.ErrGitNotInit):
-				debug.Log("skipping git commit - git not initialized in %s", subTo.Alias())
-			case errors.Is(err, store.ErrGitNothingToCommit):
-				debug.Log("skipping git commit - nothing to commit in %s", subTo.Alias())
-			default:
-				return fmt.Errorf("failed to commit changes to git (%s): %w", subTo.Alias(), err)
-			}
+		if err := subTo.Storage().TryCommit(ctx, fmt.Sprintf("Move from %s to %s", from, to)); err != nil {
+			return fmt.Errorf("failed to commit changes to git (%s): %w", subTo.Alias(), err)
 		}
 	}
 
-	if err := subFrom.Storage().Push(ctx, "", ""); err != nil {
-		if errors.Is(err, store.ErrGitNotInit) {
-			msg := "Warning: git is not initialized for this storage. Ignoring auto-push option\n" +
-				"Run: gopass git init"
-			debug.Log(msg)
-
-			return nil
-		}
-
-		if errors.Is(err, store.ErrGitNoRemote) {
-			msg := "Warning: git has no remote. Ignoring auto-push option\n" +
-				"Run: gopass git remote add origin ..."
-			debug.Log(msg)
-
-			return nil
-		}
-
+	if err := subFrom.Storage().TryPush(ctx, "", ""); err != nil {
 		return fmt.Errorf("failed to push change to git remote: %w", err)
 	}
 
@@ -101,36 +64,28 @@ func (r *Store) move(ctx context.Context, from, to string, del bool) error {
 		return nil
 	}
 
-	if err := subTo.Storage().Push(ctx, "", ""); err != nil {
-		if errors.Is(err, store.ErrGitNotInit) {
-			msg := "Warning: git is not initialized for this storage. Ignoring auto-push option\n" +
-				"Run: gopass git init"
-			debug.Log(msg)
-
-			return nil
-		}
-
-		if errors.Is(err, store.ErrGitNoRemote) {
-			msg := "Warning: git has no remote. Ignoring auto-push option\n" +
-				"Run: gopass git remote add origin ..."
-			debug.Log(msg)
-
-			return nil
-		}
-
+	if err := subTo.Storage().TryPush(ctx, "", ""); err != nil {
 		return fmt.Errorf("failed to push change to git remote: %w", err)
 	}
 
 	return nil
 }
 
-func (r *Store) moveFromTo(ctx context.Context, subFrom *leaf.Store, from, to, fromPrefix string, srcIsDir, dstIsDir, del bool) error {
+func (r *Store) moveFromTo(ctx context.Context, subFrom *leaf.Store, from, to, fromPrefix string, del bool) error {
 	ctx = ctxutil.WithGitCommit(ctx, false)
+
+	// source is a directory and not a "shadowed" leaf
+	srcIsDir := r.IsDir(ctx, from) && !r.Exists(ctx, from)
+	dstIsDir := r.IsDir(ctx, to)
+
+	if srcIsDir && r.Exists(ctx, to) && !dstIsDir {
+		return fmt.Errorf("destination is a file")
+	}
 
 	entries := []string{from}
 	// if the source is a directory we enumerate all it's children
 	// and move them one by one.
-	if r.IsDir(ctx, from) {
+	if srcIsDir {
 		var err error
 
 		entries, err = subFrom.List(ctx, fromPrefix+"/")

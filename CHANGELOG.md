@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.15.11 / 2023-12-01
+
+* [bugfix] Disable multi-line description for deb packages (#2729)
+* [bugfix] Fix writes to global config from tests (#2727)
+* [bugfix] Workaround for goreleaser/nfpm#742 (#2732)
+* [feature] Allow setting autosync.interval in different time units (#2731)
+
+## 1.15.10 / 2023-11-25
+
+* [BUGFIX] Allow to move shadowed entries into their own folder (#2718)
+* [BUGFIX] Try to always honor local config for mounts (#2724)
+* [chore] Add OSSF scorecard link and improve security posture (#2704)
+* [chore] Update goxkcdpwgen dependency to include my PR (#2722)
+* [chore] Update grype workflow and pin Docker base images (#2706)
+* [cleanup] Add package description (#2702)
+* [feature] Add new pwgen options to capitalize and include numbers in (#2703)
+
 ## 1.15.9 / 2023-11-18
 
 * [BUGFIX] Disabling the OTP snip screenshot feature on OpenBSD (#2685)

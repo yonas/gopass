@@ -22,6 +22,18 @@ var (
 	systemConfig = "/etc/gopass/config"
 )
 
+type Level int
+
+const (
+	None Level = iota
+	Env
+	Worktree
+	Local
+	Global
+	System
+	Preset
+)
+
 func newGitconfig() *gitconfig.Configs {
 	c := gitconfig.New()
 	c.EnvPrefix = envPrefix
@@ -37,6 +49,7 @@ var defaults = map[string]string{
 	"core.cliptimeout":   "45",
 	"core.exportkeys":    "true",
 	"core.notifications": "true",
+	"pwgen.xkcd-lang":    "en",
 }
 
 // Config is a gopass config handler.
@@ -67,10 +80,15 @@ func New() *Config {
 	return c
 }
 
-// NewNoWrites initializes a new config that does not allow writes. For use in tests.
+// NewInMemory initializes a new config that does not allow writes. For use in tests.
 // This does not migrate legacy option names to their correct config section.
-func NewNoWrites() *Config {
+func NewInMemory() *Config {
 	return newWithOptions(true)
+}
+
+// NewContextReadOnly returns a context with a read-only config.
+func NewContextInMemory() context.Context {
+	return NewInMemory().WithConfig(context.Background())
 }
 
 func newWithOptions(noWrites bool) *Config {
@@ -138,9 +156,15 @@ func (c *Config) GetAll(key string) []string {
 	return c.root.GetAll(key)
 }
 
+// GetGlobal returns the given key from the root global config.
+// This is typically used to prevent a local config override of sensitive config items, e.g. used for integrity checks.
+func (c *Config) GetGlobal(key string) string {
+	return c.root.GetGlobal(key)
+}
+
 // GetM returns the given key from the mount or the root config if mount is empty.
 func (c *Config) GetM(mount, key string) string {
-	if mount == "" {
+	if mount == "" || mount == "<root>" {
 		return c.root.Get(key)
 	}
 
@@ -152,9 +176,16 @@ func (c *Config) GetM(mount, key string) string {
 }
 
 // GetBool returns true if the value of the key evaluates to "true".
-// Otherwise it returns false.
+// Otherwise, it returns false.
 func (c *Config) GetBool(key string) bool {
-	if strings.ToLower(strings.TrimSpace(c.Get(key))) == "true" {
+	return c.GetBoolM("", key)
+}
+
+// GetBoolM returns true if the value of the key evaluates to "true" for the provided mount,
+// or the root config if mount is empty.
+// Otherwise, it returns false.
+func (c *Config) GetBoolM(mount, key string) bool {
+	if strings.ToLower(strings.TrimSpace(c.GetM(mount, key))) == "true" {
 		return true
 	}
 
@@ -162,9 +193,16 @@ func (c *Config) GetBool(key string) bool {
 }
 
 // GetInt returns the integer value of the key if it can be parsed.
-// Otherwise it returns 0.
+// Otherwise, it returns 0.
 func (c *Config) GetInt(key string) int {
-	iv, err := strconv.Atoi(c.Get(key))
+	return c.GetIntM("", key)
+}
+
+// GetIntM returns the integer value of the key if it can be parsed for the provided mount,
+// or the root config if mount is empty
+// Otherwise, it returns 0.
+func (c *Config) GetIntM(mount, key string) int {
+	iv, err := strconv.Atoi(c.GetM(mount, key))
 	if err != nil {
 		return 0
 	}
@@ -182,19 +220,29 @@ func (c *Config) GetInt(key string) int {
 //   - If mount has any other value we will attempt to write the setting to the per-directory config of this mount.
 //   - If the mount point does not exist we will return nil.
 func (c *Config) Set(mount, key, value string) error {
+	_, err := c.SetWithLevel(mount, key, value)
+
+	return err
+}
+
+// SetWithLevel is the same as Set, but it also returns the level at which the config was set.
+// It currently only supports global and local configs.
+func (c *Config) SetWithLevel(mount, key, value string) (Level, error) {
 	if mount == "" {
-		return c.root.SetGlobal(key, value)
+		return Global, c.root.SetGlobal(key, value)
 	}
 
 	if mount == "<root>" {
-		return c.root.SetLocal(key, value)
+		return Local, c.root.SetLocal(key, value)
 	}
 
-	if cfg := c.cfgs[mount]; cfg != nil {
-		return cfg.SetLocal(key, value)
+	if cfg, ok := c.cfgs[mount]; !ok {
+		return None, fmt.Errorf("substore %q is not initialized or doesn't exist", mount)
+	} else if cfg != nil {
+		return Local, cfg.SetLocal(key, value)
 	}
 
-	return nil
+	return None, nil
 }
 
 // SetEnv overrides a key in the non-persistent layer.
@@ -217,7 +265,7 @@ func (c *Config) SetPath(path string) error {
 	return c.Set("", "mounts.path", path)
 }
 
-// SetMountPath is a short cut to set a mount to a path.
+// SetMountPath is a shortcut to set a mount to a path.
 func (c *Config) SetMountPath(mount, path string) error {
 	return c.Set("", mpk(mount), path)
 }
@@ -252,7 +300,7 @@ func (c *Config) Unset(mount, key string) error {
 
 // Keys returns all keys in the given config.
 func (c *Config) Keys(mount string) []string {
-	if mount == "" {
+	if mount == "" || mount == "<root>" {
 		return c.root.Keys()
 	}
 
@@ -311,9 +359,9 @@ func (c *Config) migrateOptions(migrations map[string]string) {
 // will be true, otherwise it will be false.
 func DefaultPasswordLengthFromEnv(ctx context.Context) (int, bool) {
 	def := DefaultPasswordLength
-	cfg := FromContext(ctx)
+	cfg, mp := FromContext(ctx)
 
-	if l := cfg.GetInt("generate.length"); l > 0 {
+	if l := cfg.GetIntM(mp, "generate.length"); l > 0 {
 		def = l
 	}
 

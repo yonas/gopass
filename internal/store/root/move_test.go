@@ -1,9 +1,9 @@
 package root
 
 import (
-	"context"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/tree"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/tests/gptest"
@@ -20,7 +20,7 @@ func TestMoveShadow(t *testing.T) {
 
 	require.NoError(t, u.InitStore(""))
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithHidden(ctx, true)
 
@@ -56,7 +56,7 @@ func TestMove(t *testing.T) {
 	}
 	require.NoError(t, u.InitStore(""))
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithHidden(ctx, true)
 
@@ -151,7 +151,7 @@ func TestUnixMvSemantics(t *testing.T) {
 	}
 	require.NoError(t, u.InitStore(""))
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithHidden(ctx, true)
 
@@ -188,7 +188,7 @@ func TestRegression2079(t *testing.T) {
 	}
 	require.NoError(t, u.InitStore(""))
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithHidden(ctx, true)
 
@@ -225,7 +225,7 @@ func TestCopy(t *testing.T) {
 	}
 	require.NoError(t, u.InitStore(""))
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithHidden(ctx, true)
 
@@ -304,7 +304,7 @@ func TestMoveSelf(t *testing.T) {
 	}
 	require.NoError(t, u.InitStore(""))
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithHidden(ctx, true)
 
@@ -415,4 +415,41 @@ func TestComputeMoveDestination(t *testing.T) {
 			assert.Equal(t, tc.dst, dst, tc.name)
 		})
 	}
+}
+
+func TestRegression892(t *testing.T) {
+	u := gptest.NewUnitTester(t)
+	u.Entries = []string{
+		"some/example",
+		"some/example/test2",
+		"communication/t1",
+	}
+	require.NoError(t, u.InitStore(""))
+
+	ctx := config.NewContextInMemory()
+	ctx = ctxutil.WithAlwaysYes(ctx, true)
+	ctx = ctxutil.WithHidden(ctx, true)
+
+	rs, err := createRootStore(ctx, u)
+	require.NoError(t, err)
+	require.NoError(t, rs.Delete(ctx, "foo"))
+
+	// Initial state:
+	entries, err := rs.List(ctx, tree.INF)
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"communication/t1",
+		"some/example",
+		"some/example/test2",
+	}, entries)
+
+	// -> move comm email => Rename comm to email
+	require.NoError(t, rs.Move(ctx, "some/example", "some/example/test1"))
+	entries, err = rs.List(ctx, tree.INF)
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"communication/t1",
+		"some/example/test1",
+		"some/example/test2",
+	}, entries)
 }
